@@ -70,11 +70,9 @@ func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	var putAppendReply PutAppendReply
 	for !ck.server.Call("KVServer."+op, &putAppendArgs, &putAppendReply) {
 	}
-	putAppendArgs = PutAppendArgs{
-		Flag: flag,
-		Kind: DONE,
-	}
-	for !ck.server.Call("KVServer."+op, &putAppendArgs, &putAppendReply) {
+	if op == "Append" {
+		for !ck.server.Call("KVServer."+op, &PutAppendArgs{Flag: flag, Kind: DONE}, &PutAppendReply{}) {
+		}
 	}
 	return putAppendReply.Value
 }

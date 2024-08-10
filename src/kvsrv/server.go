@@ -35,25 +35,17 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	if args.Kind == DONE {
-		kv.RetryMap.Delete(args.Flag)
-	}
-	val, ok := kv.RetryMap.Load(args.Flag)
-	if ok {
-		reply.Value = val.(string)
-		return
-	}
 	kv.mu.Lock()
 	kv.KV[args.Key] = args.Value
 	reply.Value = args.Value
 	kv.mu.Unlock()
-	kv.RetryMap.Store(args.Flag, reply.Value)
 }
 
 func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	if args.Kind == DONE {
 		kv.RetryMap.Delete(args.Flag)
+		return
 	}
 	val, ok := kv.RetryMap.Load(args.Flag)
 	if ok {
