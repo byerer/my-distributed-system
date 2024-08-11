@@ -72,7 +72,6 @@ type Raft struct {
 	currentTerm int
 	status      int
 	votedFor    int
-	//voteChan    chan bool
 }
 
 // return currentTerm and whether this server
@@ -170,17 +169,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = currentTerm
 		return
 	}
-	/*if args.Term <= currentTerm && rf.votedFor != -1 {
-		reply.VoteGranted = false
-		if args.Term < currentTerm {
-			reply.Term = currentTerm
-		}
-		return
-	}*/
 	rf.votedFor = args.CandidateID
 	rf.status = FOLLOWER
 	rf.currentTerm = args.Term
-	fmt.Println("Server", rf.me, "votes for server", args.CandidateID, "in term", rf.currentTerm)
 	reply.VoteGranted = true
 }
 
@@ -202,7 +193,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term < currentTerm {
 		reply.Success = false
 		reply.Term = currentTerm
-		fmt.Println("Server", rf.me, "receives an AppendEntries RPC from server", args.LeaderID, "in term", args.Term, "but rejects it")
 		return
 	} else {
 		rf.currentTerm = args.Term
@@ -306,18 +296,47 @@ func (rf *Raft) ticker() {
 			rf.status = CANDIDATE
 			rf.votedFor = -1
 			rf.mu.Unlock()
-			time.Sleep(time.Duration(220) * time.Millisecond)
+			time.Sleep(time.Duration(120) * time.Millisecond)
 
-			rf.mu.Lock()
-			if rf.status == FOLLOWER {
-				fmt.Println("Server", rf.me, "receive signal in term", rf.currentTerm)
-			}
-			rf.mu.Unlock()
+			//rf.mu.Lock()
+			//if rf.status == FOLLOWER {
+			//	fmt.Println("Server", rf.me, "receive signal in term", rf.currentTerm)
+			//}
+			//rf.mu.Unlock()
 
 		case CANDIDATE:
 			rf.election()
-
+			rf.mu.Lock()
+			//fmt.Println(fmt.Sprintf("Server %d after election is in term %d and status %d", rf.me, rf.currentTerm, rf.status))
+			rf.mu.Unlock()
 		case LEADER:
+			rf.mu.Lock()
+			for i := 0; i < len(rf.peers); i++ {
+				if i == rf.me {
+					continue
+				}
+				go func(server int, status int) {
+					if status != LEADER {
+						return
+					}
+					args := AppendEntriesArgs{
+						Term:     rf.currentTerm,
+						LeaderID: rf.me,
+					}
+					reply := AppendEntriesReply{}
+					rf.sendAppendEntries(server, &args, &reply)
+					rf.mu.Lock()
+					if reply.Success == false {
+						if rf.currentTerm < reply.Term {
+							rf.status = FOLLOWER
+							rf.currentTerm = reply.Term
+						}
+					}
+					rf.mu.Unlock()
+				}(i, rf.status)
+			}
+			rf.mu.Unlock()
+			time.Sleep(110 * time.Millisecond) //每秒心跳不超过十次
 		}
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
@@ -326,7 +345,7 @@ func (rf *Raft) ticker() {
 	}
 }
 
-func (rf *Raft) election() { //接收到heartbeat后停止选举
+func (rf *Raft) election() { //todo 接收到heartbeat后停止选举
 
 	rf.mu.Lock()
 	rf.currentTerm++
@@ -335,7 +354,8 @@ func (rf *Raft) election() { //接收到heartbeat后停止选举
 		Term:        rf.currentTerm,
 		CandidateID: rf.me,
 	}
-	fmt.Println("Server", rf.me, "becomes a candidate in term", rf.currentTerm)
+	//fmt.Println(fmt.Sprintf("-----------Server %d starts election in term %d----------", rf.me, rf.currentTerm))
+	//defer fmt.Println(fmt.Sprintf("-----Server %d ends election in term %d and status %d-----", rf.me, rf.currentTerm, rf.status))
 	rf.mu.Unlock()
 
 	voteChan := make(chan bool)
@@ -350,7 +370,6 @@ func (rf *Raft) election() { //接收到heartbeat后停止选举
 			voteChan <- reply.VoteGranted
 			termChan <- reply.Term
 		}(i)
-		fmt.Println("Server", rf.me, "sends a RequestVote RPC to server", i)
 	}
 	for voteCount < len(rf.peers)/2+1 && finished < len(rf.peers)-1 { //
 		select {
@@ -361,63 +380,37 @@ func (rf *Raft) election() { //接收到heartbeat后停止选举
 				rf.mu.Lock()
 				tempTerm := <-termChan
 				if rf.currentTerm < tempTerm {
+					fmt.Println(fmt.Sprintf("Server %d receives a higher term %d in term %d", rf.me, tempTerm, rf.currentTerm))
 					rf.currentTerm = tempTerm
 					rf.status = FOLLOWER
 				}
 				rf.mu.Unlock()
 			}
 			finished++
-		case <-time.After(time.Duration(300+rand.Int63()%100) * time.Millisecond):
-			fmt.Println("Server", rf.me, "failed in term", rf.currentTerm)
+		case <-time.After(time.Duration(400+rand.Int63()%300) * time.Millisecond):
+			rf.mu.Lock()
+			rf.status = FOLLOWER
+			rf.mu.Unlock()
+			//超时
+			/*rf.mu.Lock()
+			rf.status = FOLLOWER
+			rf.mu.Unlock()*/
 			return
 		}
+
+		//if rf.status == FOLLOWER {
+		//	return
+		//}
 	}
 	rf.mu.Lock()
-	fmt.Println("Server", rf.me, "receives", voteCount, "votes in term", rf.currentTerm)
 	if voteCount >= len(rf.peers)/2+1 {
 		rf.status = LEADER
-		fmt.Println("Server", rf.me, "becomes the leader in", rf.currentTerm)
+		fmt.Println(fmt.Sprintf("Server %d 选举成功 in term %d", rf.me, rf.currentTerm))
 	} else {
 		rf.status = FOLLOWER
-		fmt.Println("Server", rf.me, "fails to become the leader in term", rf.currentTerm)
+		fmt.Println(fmt.Sprintf("Server %d 选举失败 in term %d", rf.me, rf.currentTerm))
 	}
 	rf.mu.Unlock()
-}
-
-func (rf *Raft) heartbeat() {
-	for !rf.killed() {
-		rf.mu.Lock()
-		if rf.status == LEADER {
-			for i := 0; i < len(rf.peers); i++ {
-				if i != rf.me {
-					go func(server int, status int) {
-						if status != LEADER {
-							fmt.Println("Server", rf.me, "is not a leader in term", rf.currentTerm)
-							return
-						}
-						args := AppendEntriesArgs{
-							Term:     rf.currentTerm,
-							LeaderID: rf.me,
-						}
-						reply := AppendEntriesReply{}
-						rf.sendAppendEntries(server, &args, &reply)
-						rf.mu.Lock()
-						if reply.Success == false {
-							if rf.currentTerm < reply.Term {
-								rf.status = FOLLOWER
-								rf.currentTerm = reply.Term
-								fmt.Println("Server", rf.me, "becomes a follower in term", rf.currentTerm)
-							}
-						}
-						rf.mu.Unlock()
-						fmt.Println("Server", rf.me, "sent heartbeat to server", server, "in term", rf.currentTerm)
-					}(i, rf.status)
-				}
-			}
-		}
-		rf.mu.Unlock()
-		time.Sleep(110 * time.Millisecond) // The tester requires that the leader send heartbeat RPCs no more than ten times per second.
-	}
 }
 
 // the service or tester wants to create a Raft server. the ports
@@ -447,7 +440,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	//time.Sleep(100 * time.Millisecond)
 	// start ticker goroutine to start elections
 	go rf.ticker()
-	go rf.heartbeat()
 
 	return rf
 }
