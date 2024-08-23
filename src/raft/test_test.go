@@ -108,6 +108,7 @@ func TestManyElections3A(t *testing.T) {
 		i1 := rand.Int() % servers
 		i2 := rand.Int() % servers
 		i3 := rand.Int() % servers
+		fmt.Println(ii, i2, i3)
 		cfg.disconnect(i1)
 		cfg.disconnect(i2)
 		cfg.disconnect(i3)
@@ -115,7 +116,7 @@ func TestManyElections3A(t *testing.T) {
 		// either the current leader should still be alive,
 		// or the remaining four should elect a new one.
 		a := cfg.checkOneLeader()
-		fmt.Println(ii, i2, i3)
+
 		fmt.Println(fmt.Sprintf("！！！%d 轮选举通过, server %d", ii, a))
 		cfg.connect(i1)
 		cfg.connect(i2)
@@ -137,6 +138,7 @@ func TestBasicAgree3B(t *testing.T) {
 	iters := 3
 	for index := 1; index < iters+1; index++ {
 		nd, _ := cfg.nCommitted(index)
+		fmt.Println("index", index, "nd", nd)
 		if nd > 0 {
 			t.Fatalf("some have committed before Start()")
 		}
@@ -196,6 +198,7 @@ func TestFollowerFailure3B(t *testing.T) {
 	// disconnect one follower from the network.
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect((leader1 + 1) % servers)
+	fmt.Println("leader1", leader1)
 
 	// the leader and remaining follower should be
 	// able to agree despite the disconnected follower.
@@ -468,24 +471,19 @@ func TestRejoin3B(t *testing.T) {
 	// leader network failure
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
-
 	// make old leader try to agree on some entries
 	cfg.rafts[leader1].Start(102)
 	cfg.rafts[leader1].Start(103)
 	cfg.rafts[leader1].Start(104)
-
 	// new leader commits, also for index=2
 	cfg.one(103, 2, true)
 
 	// new leader network failure
 	leader2 := cfg.checkOneLeader()
 	cfg.disconnect(leader2)
-
 	// old leader connected again
 	cfg.connect(leader1)
-
 	cfg.one(104, 2, true)
-
 	// all together now
 	cfg.connect(leader2)
 
